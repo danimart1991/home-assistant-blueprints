@@ -1,0 +1,162 @@
+blueprint:
+  name: Reload Integrations Automatically (v1.0.0)
+  description: >-
+    # Reload Integrations Automatically (v1.0.0)
+
+    **🔄 Automation to reload integrations that get "stuck" in Home Assistant**
+
+
+    This blueprint monitors the selected entities and when it detects they become 
+    "Unavailable", it automatically attempts to reload the corresponding integration. If after 
+    several attempts the integration still doesn't work, it will send you a notification so you 
+    know it needs manual attention.
+
+
+    **💡 Typical use cases:**
+
+    - AEMET integration that disconnects
+
+    - Xiaomi/Roborock devices that lose connection
+
+    - External APIs that fail temporarily
+
+    - Wi-Fi sensors that disconnect
+
+    - ...
+
+
+    **📖 [Have questions?](https://domoticarte.com/en/p/reload-integrations-blueprint)**
+  domain: automation
+  author: danimart1991 (https://github.com/danimart1991)
+  homeassistant:
+    min_version: 2024.6.0
+
+  input:
+    general:
+      name: General Configuration
+      icon: mdi:tune
+      description: Main automation configuration settings
+      collapsed: false
+      input:
+        entities:
+          name: Entities to monitor
+          description: >-
+            Select the entities you want to monitor. When one of these entities 
+            becomes "Unavailable", the automation will attempt to reload its integration.
+
+
+            **💡 Examples of typical entities:**
+
+            - `weather.aemet` (for AEMET integration).
+
+            - `vacuum.roborock_s5_max` (for Roborock/Xiaomi vacuum robots).
+
+            - `sensor.samsung_1234` (for Samsung SmartThings devices).
+
+            - `switch.tapo_c210_privacy` (for Tapo cameras).
+          selector:
+            entity:
+              multiple: true
+        check_duration:
+          name: Time before first attempt and between retries
+          description: >-
+            Time an entity must be "Unavailable" before attempting to reload 
+            the integration, and waiting time between each retry.
+
+
+            **🕐 Recommended values:**
+
+            - **5 minutes**: For stable integrations (AEMET, Roborock, etc.).
+
+            - **2 minutes**: For devices that disconnect frequently.
+
+            - **10 minutes**: For integrations that are slow to respond.
+          selector:
+            duration:
+          default:
+            hours: 0
+            minutes: 5
+            seconds: 0
+        tries:
+          name: Maximum number of attempts
+          description: >-
+            How many times it will attempt to reload the integration before giving up 
+            and sending the error notification.
+
+
+            **📊 Typical values:**
+
+            - **3 attempts**: For stable integrations.
+
+            - **5 attempts**: For problematic integrations (recommended value).
+
+            - **10 attempts**: For very problematic cases.
+          default: 5
+          selector:
+            number:
+              min: 1
+              max: 20
+              step: 1
+    notifications:
+      name: Notifications/Actions Configuration
+      icon: mdi:bell
+      description: Configuration for notifications/actions when an integration cannot be reloaded
+      collapsed: false
+      input:
+        not_working_actions:
+          name: Actions when recovery fails
+          description: >-
+            Actions that will be executed when the automation fails to reload the integration 
+            after all attempts. Typically send a notification to mobile.
+
+
+            **📱 Available variables to use in actions/notifications:**
+
+            - `{{ trigger.entity_id }}` - ID of the entity that failed.
+
+            - `{{ trigger.from_state.attributes.friendly_name }}` - Friendly name of the entity.
+
+            - `{{ area_name(trigger.entity_id) }}` - Area where the entity is located (if assigned).
+
+
+            **💡 Message example:**
+            "The integration {{ trigger.from_state.attributes.friendly_name }} is still not working after several attempts"
+          selector:
+            action: {}
+          default:
+            - action: notify.notify
+              data:
+                title: "🚨 Error Reloading Integration"
+                message: >-
+                  The entity {{ trigger.from_state.attributes.friendly_name }}
+                  ({{ trigger.entity_id }}) is still not working after several
+                  automatic reload attempts. Please check the integration manually.
+
+mode: parallel
+max: 10
+
+triggers:
+  - trigger: state
+    entity_id: !input entities
+    to: unavailable
+    for: !input check_duration
+
+conditions: []
+
+actions:
+  - repeat:
+      count: !input tries
+      sequence:
+        - action: homeassistant.reload_config_entry
+          data: {}
+          target:
+            entity_id: "{{ trigger.entity_id }}"
+        - delay: !input check_duration
+        - if:
+            - condition: template
+              value_template: "{{ states(trigger.entity_id) == 'unavailable' }}"
+          then: []
+          else:
+            - stop: ""
+  - choose: []
+    default: !input not_working_actions
