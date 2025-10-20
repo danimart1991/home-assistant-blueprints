@@ -1,0 +1,162 @@
+blueprint:
+  name: Recargar Integraciones Automáticamente (v1.0.0)
+  description: >-
+    # Recargar Integraciones Automáticamente (v1.0.0)
+
+    **🔄 Automatización para recargar integraciones que se quedan "colgadas" en Home Assistant**
+
+
+    Este blueprint monitoriza las entidades seleccionadas y cuando detecta que se quedan en estado 
+    "No disponible", automáticamente intenta recargar la integración correspondiente. Si después 
+    de varios intentos la integración sigue sin funcionar, te enviará una notificación para que 
+    sepas que necesita atención manual.
+
+
+    **💡 Casos de uso típicos:**
+
+    - Integración de AEMET que se desconecta
+
+    - Dispositivos Xiaomi/Roborock que pierden conexión
+
+    - APIs externas que fallan temporalmente
+
+    - Sensores Wi-Fi que se desconectan
+
+    - ...
+
+
+    **📖 [¿Tienes dudas?](https://domoticarte.com/p/recargar-integrationes-automatizacion/)**
+  domain: automation
+  author: danimart1991 (https://github.com/danimart1991)
+  homeassistant:
+    min_version: 2024.6.0
+
+  input:
+    general:
+      name: Configuración General
+      icon: mdi:tune
+      description: Configuraciónes principales de la automatización
+      collapsed: false
+      input:
+        entities:
+          name: Entidades a monitorizar
+          description: >-
+            Selecciona las entidades que quieres monitorizar. Cuando una de estas entidades 
+            se quede en estado "No disponible", la automatización intentará recargar su integración.
+
+
+            **💡 Ejemplos de entidades típicas:**
+
+            - `weather.aemet` (para la integración de AEMET).
+
+            - `vacuum.roborock_s5_max` (para robots aspirador Roborock/Xiaomi).
+
+            - `sensor.speedtest_download` (para dispositivos Samsung SmartThings).
+
+            - `switch.tapo_c210_privacy` (para cámaras Tapo).
+          selector:
+            entity:
+              multiple: true
+        check_duration:
+          name: Tiempo antes del primer intento y entre reintentos
+          description: >-
+            Tiempo que debe estar una entidad "No disponible" antes de intentar recargar 
+            la integración, y tiempo de espera entre cada reintento.
+
+
+            **🕐 Valores recomendados:**
+
+            - **5 minutos**: Para integraciones estables (AEMET, Roborock, etc.).
+
+            - **2 minutos**: Para dispositivos que se desconectan frecuentemente.
+
+            - **10 minutos**: Para integraciones que tardan en responder.
+          selector:
+            duration:
+          default:
+            hours: 0
+            minutes: 5
+            seconds: 0
+        tries:
+          name: Número máximo de intentos
+          description: >-
+            Cuántas veces intentará recargar la integración antes de darse por vencida 
+            y enviar la notificación de error.
+
+
+            **📊 Valores típicos:**
+
+            - **3 intentos**: Para integraciones estables.
+
+            - **5 intentos**: Para integraciones problemáticas (valor recomendado).
+
+            - **10 intentos**: Para casos muy problemáticos.
+          default: 5
+          selector:
+            number:
+              min: 1
+              max: 20
+              step: 1
+    notifications:
+      name: Configuración de Notificaciones/Acciones
+      icon: mdi:bell
+      description: Configuración para las notificaciones/acciones cuando no se puede recargar una integración
+      collapsed: false
+      input:
+        not_working_actions:
+          name: Acciones cuando falla la recuperación
+          description: >-
+            Acciones que se ejecutarán cuando la automatización no consiga recargar la integración 
+            después de todos los intentos. Típicamente enviar una notificación al móvil.
+
+
+            **📱 Variables disponibles para usar en las acciones/notificaciones:**
+
+            - `{{ trigger.entity_id }}` - ID de la entidad que falló.
+
+            - `{{ trigger.from_state.attributes.friendly_name }}` - Nombre amigable de la entidad.
+
+            - `{{ area_name(trigger.entity_id) }}` - Área donde está la entidad (si está asignada).
+
+
+            **💡 Ejemplo de mensaje:**
+            "La integración {{ trigger.from_state.attributes.friendly_name }} sigue sin funcionar tras varios intentos"
+          selector:
+            action: {}
+          default:
+            - action: notify.notify
+              data:
+                title: "🚨 Error Recargando Integración"
+                message: >-
+                  La entidad {{ trigger.from_state.attributes.friendly_name }}
+                  ({{ trigger.entity_id }}) sigue sin funcionar después de varios
+                  intentos de recarga automáticos. Revisa manualmente la integración.
+
+mode: parallel
+max: 10
+
+triggers:
+  - trigger: state
+    entity_id: !input entities
+    to: unavailable
+    for: !input check_duration
+
+conditions: []
+
+actions:
+  - repeat:
+      count: !input tries
+      sequence:
+        - action: homeassistant.reload_config_entry
+          data: {}
+          target:
+            entity_id: "{{ trigger.entity_id }}"
+        - delay: !input check_duration
+        - if:
+            - condition: template
+              value_template: "{{ states(trigger.entity_id) == 'unavailable' }}"
+          then: []
+          else:
+            - stop: ""
+  - choose: []
+    default: !input not_working_actions
